@@ -1,4 +1,5 @@
-import React, { useRef, useState, useEffect } from "react";
+import * as React from "react";
+import { useRef, useState, useEffect } from "react";
 import { Button } from "./ui/button";
 import { ScrollArea } from "./ui/scroll-area";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -18,12 +19,13 @@ const ScreenShare: React.FC = () => {
   const audioWorkletNodeRef = useRef<AudioWorkletNode | null>(null);
   const setupInProgressRef = useRef(false);
   const [isSharing, setIsSharing] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
   const [messages, setMessages] = useState<ChatMessage[]>([{
-    text: "Screen sharing session started. I'll transcribe what I see.",
+    text: "Welcome! Click 'Connect to Server' to begin.",
     timestamp: new Date().toLocaleTimeString()
   }]);
-  const { sendMessage, sendMediaChunk, isConnected, playbackAudioLevel, lastMessage } = useWebSocket();
+  const { sendMessage, sendMediaChunk, isConnected, playbackAudioLevel, lastMessage, connect } = useWebSocket();
   const captureIntervalRef = useRef<NodeJS.Timeout>();
 
   // Handle incoming messages
@@ -36,8 +38,30 @@ const ScreenShare: React.FC = () => {
     }
   }, [lastMessage]);
 
+  // Handle connection state changes
+  useEffect(() => {
+    if (isConnected) {
+      setIsConnecting(false);
+      setMessages(prev => [...prev, {
+        text: "Connected to server successfully. You can now share your screen.",
+        timestamp: new Date().toLocaleTimeString()
+      }]);
+    }
+  }, [isConnected]);
+
+  const handleConnect = () => {
+    if (isConnected) return;
+    
+    setIsConnecting(true);
+    setMessages(prev => [...prev, {
+      text: "Connecting to server...",
+      timestamp: new Date().toLocaleTimeString()
+    }]);
+    connect();
+  };
+
   const startSharing = async () => {
-    if (isSharing) return;
+    if (isSharing || !isConnected) return;
 
     try {
       // Get screen stream
@@ -173,16 +197,16 @@ const ScreenShare: React.FC = () => {
     <div className="container mx-auto p-6 space-y-6 max-w-3xl">
       {/* Welcome Header */}
       <div className="text-center space-y-2">
-        <h1 className="scroll-m-20 text-4xl font-extrabold tracking-tight lg:text-5xl">
+        <h1 className="scroll-m-20 text-4xl font-extrabold tracking-tight lg:text-5xl text-white">
           Welcome to AI Screen Sharing Assistant
         </h1>
-        <p className="text-xl text-muted-foreground">
+        <p className="text-xl text-gray-200">
           Share your screen and talk to me
         </p>
       </div>
 
       {/* Screen Preview */}
-      <Card className="w-full md:w-[640px] mx-auto">
+      <Card className="w-full md:w-[640px] mx-auto bg-white/10 backdrop-blur-sm border-white/20">
         <CardContent className="p-6">
           <div className="flex flex-col items-center space-y-4">
             <video
@@ -190,41 +214,51 @@ const ScreenShare: React.FC = () => {
               autoPlay
               playsInline
               muted
-              className="w-full aspect-video rounded-md border bg-muted"
+              className="w-full aspect-video rounded-md border border-white/20 bg-black/40"
             />
             {/* Combined Audio Level Indicator */}
             {isSharing && (
               <div className="w-full space-y-2">
                 <Progress 
                   value={Math.max(audioLevel, playbackAudioLevel)} 
-                  className="h-1 bg-white" 
-                  indicatorClassName="bg-black" 
+                  className="h-1 bg-white/20" 
+                  indicatorClassName="bg-white" 
                 />
               </div>
             )}
-            {!isSharing ? (
+            {/* Connection/Sharing Button */}
+            {!isConnected ? (
               <Button 
                 size="lg" 
-                onClick={startSharing}
-                disabled={!isConnected}
-                variant={isConnected ? "default" : "outline"}
-                className={!isConnected ? "border-red-300 text-red-700" : ""}
+                onClick={handleConnect}
+                disabled={isConnecting}
+                className={isConnecting ? "bg-gray-500" : "bg-blue-500 hover:bg-blue-600 text-white"}
               >
-                {isConnected ? "Start Screen Share" : "Connecting to server..."}
+                {isConnecting ? "Connecting..." : "Connect to Server"}
               </Button>
             ) : (
-              <Button size="lg" variant="destructive" onClick={stopSharing}>
-                Stop Sharing
-              </Button>
+              !isSharing ? (
+                <Button 
+                  size="lg" 
+                  onClick={startSharing}
+                  className="bg-white text-black hover:bg-gray-200"
+                >
+                  Start Screen Share
+                </Button>
+              ) : (
+                <Button size="lg" variant="destructive" onClick={stopSharing} className="bg-red-500 hover:bg-red-600 text-white">
+                  Stop Sharing
+                </Button>
+              )
             )}
           </div>
         </CardContent>
       </Card>
 
       {/* Chat History */}
-      <Card className="w-full md:w-[640px] mx-auto">
+      <Card className="w-full md:w-[640px] mx-auto bg-white/10 backdrop-blur-sm border-white/20">
         <CardHeader>
-          <CardTitle>Chat History</CardTitle>
+          <CardTitle className="text-white">Chat History</CardTitle>
         </CardHeader>
         <CardContent>
           <ScrollArea className="h-[400px] pr-4">
@@ -232,14 +266,14 @@ const ScreenShare: React.FC = () => {
               {messages.map((message, index) => (
                 <div 
                   key={index} 
-                  className="flex items-start space-x-4 rounded-lg p-4 bg-muted/50"
+                  className="flex items-start space-x-4 rounded-lg p-4 bg-white/5 border border-white/10"
                 >
-                  <div className="h-8 w-8 rounded-full flex items-center justify-center bg-primary">
-                    <span className="text-xs font-medium text-primary-foreground">AI</span>
+                  <div className="h-8 w-8 rounded-full flex items-center justify-center bg-white text-black">
+                    <span className="text-xs font-medium">AI</span>
                   </div>
                   <div className="space-y-1">
-                    <p className="text-sm leading-loose">{message.text}</p>
-                    <p className="text-xs text-muted-foreground">{message.timestamp}</p>
+                    <p className="text-sm leading-loose text-gray-100">{message.text}</p>
+                    <p className="text-xs text-gray-400">{message.timestamp}</p>
                   </div>
                 </div>
               ))}

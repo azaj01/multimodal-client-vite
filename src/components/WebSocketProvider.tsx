@@ -1,4 +1,5 @@
-import React, {
+import * as React from "react";
+import {
   createContext,
   useContext,
   useEffect,
@@ -15,6 +16,7 @@ interface WebSocketContextType {
   lastAudioData: string | null;
   isConnected: boolean;
   playbackAudioLevel: number;
+  connect: () => void; // Add connect function to the context
 }
 
 interface MediaChunk {
@@ -37,19 +39,16 @@ const LOOPBACK_DELAY = 3000; // 3 seconds delay matching backend
 export const WebSocketProvider: React.FC<{ children: React.ReactNode; url: string }> = ({
   children,
   url,
-}) => {
+}: { children: React.ReactNode; url: string }) => {
   const [isConnected, setIsConnected] = useState(false);
   const [playbackAudioLevel, setPlaybackAudioLevel] = useState(0);
   const [lastMessage, setLastMessage] = useState<string | null>(null);
   const [lastAudioData, setLastAudioData] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
-  const connectionTimeoutRef = useRef<NodeJS.Timeout>();
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioBufferQueueRef = useRef<AudioChunkBuffer[]>([]);
   const currentChunkRef = useRef<AudioChunkBuffer | null>(null);
   const playbackIntervalRef = useRef<NodeJS.Timeout>();
-  const reconnectAttemptsRef = useRef(0);
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
 
   // Initialize audio context for playback
@@ -62,36 +61,36 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode; url: strin
     return audioContextRef.current;
   }, []);
 
-  const connect = () => {
-    // Don't reconnect if already connecting or connected
-    if (wsRef.current && (wsRef.current.readyState === WebSocket.CONNECTING || 
-                          wsRef.current.readyState === WebSocket.OPEN)) {
-      console.log("WebSocket already connecting or connected, skipping reconnect");
+  const connect = useCallback(() => {
+    // Skip if there's an active connection
+    if (wsRef.current && 
+        (wsRef.current.readyState === WebSocket.CONNECTING || 
+         wsRef.current.readyState === WebSocket.OPEN)) {
+      console.log("[WebSocket] Active connection exists, skipping duplicate connect");
       return;
     }
 
+    // Clear any existing closed connection
+    if (wsRef.current) {
+      console.log("[WebSocket] Cleaning up previous connection reference");
+      wsRef.current = null;
+    }
+
+    console.log("[WebSocket] Attempting to connect to:", url);
     try {
       const ws = new WebSocket(url);
       wsRef.current = ws;
 
-      // Set connection timeout
-      connectionTimeoutRef.current = setTimeout(() => {
-        if (ws.readyState !== WebSocket.OPEN) {
-          ws.close();
-          reconnect();
-        }
-      }, CONNECTION_TIMEOUT);
-
+      console.log("[WebSocket] Connection object created, waiting for open event...");
+      
       ws.binaryType = 'arraybuffer'; // Enable binary message support
 
       ws.onopen = () => {
+        console.log("[WebSocket] Connection opened successfully");
         setIsConnected(true);
-        if (connectionTimeoutRef.current) {
-          clearTimeout(connectionTimeoutRef.current);
-        }
         
         // Send initial setup message only once
-        console.log("WebSocket connected, sending initial setup");
+        console.log("[WebSocket] Sending initial setup message");
         sendMessage({
           setup: {
             // Add any needed config options
@@ -99,14 +98,14 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode; url: strin
         });
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
+        console.log(`[WebSocket] Connection closed: code=${event.code}, reason=${event.reason || 'No reason provided'}`);
         setIsConnected(false);
-        reconnect();
       };
 
       ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        ws.close();
+        console.error('[WebSocket] Connection error:', error);
+        setIsConnected(false);
       };
 
       ws.onmessage = async (event) => {
@@ -144,10 +143,11 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode; url: strin
         }
       };
     } catch (error) {
-      console.error('WebSocket connection error:', error);
-      reconnect();
+      console.error('[WebSocket] Failed to create connection object:', error);
+      setIsConnected(false);
+      wsRef.current = null;
     }
-  };
+  }, [url]);
 
   const sendBinary = (data: ArrayBuffer) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -155,7 +155,17 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode; url: strin
     }
   };
 
-  // Fix the audio playback approach
+  // Remove the automatic connection on mount
+  useEffect(() => {
+    return () => {
+      console.log("[WebSocket] Component unmounting, closing connection");
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+  }, []);
+
   useEffect(() => {
     let isPlaybackActive = false;
     
@@ -273,56 +283,28 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode; url: strin
     });
   }, [initAudioContext]);
 
-  const reconnect = () => {
-    // Only schedule reconnect if not already scheduled
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-    }
-    
-    // Use exponential backoff for reconnection attempts
-    const backoffTime = Math.min(30000, RECONNECT_TIMEOUT * (reconnectAttemptsRef.current || 1));
-    console.log(`Scheduling reconnect in ${backoffTime}ms`);
-    
-    reconnectTimeoutRef.current = setTimeout(() => {
-      reconnectAttemptsRef.current = (reconnectAttemptsRef.current || 0) + 1;
-      connect();
-    }, backoffTime);
-  };
-
-  useEffect(() => {
-    connect();
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-      if (connectionTimeoutRef.current) {
-        clearTimeout(connectionTimeoutRef.current);
-      }
-    };
-  }, [url, playAudioChunk]);
-
-  useEffect(() => {
-    if (isConnected) {
-      reconnectAttemptsRef.current = 0;
-    }
-  }, [isConnected]);
-
   const sendMessage = (message: any) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
+      console.log('[WebSocket] Sending message:', message);
       wsRef.current.send(JSON.stringify(message));
+      console.log('[WebSocket] Message sent successfully');
+    } else {
+      console.log('[WebSocket] Cannot send message - connection not open. State:', wsRef.current?.readyState);
     }
   };
 
   const sendMediaChunk = (chunk: MediaChunk) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
+      const message = {
         realtime_input: {
           media_chunks: [chunk]
         }
-      }));
+      };
+      console.log('[WebSocket] Sending media chunk:', message);
+      wsRef.current.send(JSON.stringify(message));
+      console.log('[WebSocket] Media chunk sent successfully');
+    } else {
+      console.log('[WebSocket] Cannot send media chunk - connection not open. State:', wsRef.current?.readyState);
     }
   };
 
@@ -358,7 +340,8 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode; url: strin
         lastMessage,
         lastAudioData,
         isConnected,
-        playbackAudioLevel
+        playbackAudioLevel,
+        connect // Expose connect function in the context
       }}
     >
       {children}
