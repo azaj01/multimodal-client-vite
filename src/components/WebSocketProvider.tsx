@@ -16,7 +16,10 @@ interface WebSocketContextType {
   lastAudioData: string | null;
   isConnected: boolean;
   playbackAudioLevel: number;
-  connect: () => void; // Add connect function to the context
+  connect: () => void;
+  lastEditedImage: EditedImage | null;
+  clearEditedImage: () => void;
+  lastTranscription: Transcription | null;
 }
 
 interface MediaChunk {
@@ -27,6 +30,19 @@ interface MediaChunk {
 interface AudioChunkBuffer {
   data: ArrayBuffer[];
   startTimestamp: number;
+}
+
+interface EditedImage {
+  image: string;
+  mime_type: string;
+  explanation?: string | null;
+  prompt?: string | null;
+}
+
+interface Transcription {
+  text: string;
+  sender: string;
+  finished: boolean;
 }
 
 const WebSocketContext = createContext<WebSocketContextType | null>(null);
@@ -44,6 +60,8 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode; url: strin
   const [playbackAudioLevel, setPlaybackAudioLevel] = useState(0);
   const [lastMessage, setLastMessage] = useState<string | null>(null);
   const [lastAudioData, setLastAudioData] = useState<string | null>(null);
+  const [lastEditedImage, setLastEditedImage] = useState<EditedImage | null>(null);
+  const [lastTranscription, setLastTranscription] = useState<Transcription | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioBufferQueueRef = useRef<AudioChunkBuffer[]>([]);
@@ -111,6 +129,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode; url: strin
       ws.onmessage = async (event) => {
         try {
           const data = JSON.parse(event.data);
+          console.log('[WebSocket] Raw message:', typeof data, data);
           
           if (data.interrupt) {
             console.log('[WebSocket] Received interrupt signal:', data);
@@ -120,6 +139,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode; url: strin
           }
 
           if (data.text) {
+            console.log('[WebSocket] Received text:', data.text);
             setLastMessage(data.text);
           }
           
@@ -137,6 +157,28 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode; url: strin
             };
             
             audioBufferQueueRef.current.push(newChunk);
+          }
+
+          if (data.edited_image) {
+            const { image, mime_type, explanation = null, prompt = null } = data.edited_image;
+            console.log('[WebSocket] Received edited_image:', {
+              mime_type,
+              imageLength: typeof image === 'string' ? image.length : 0,
+            });
+            if (typeof image === 'string' && typeof mime_type === 'string') {
+              setLastEditedImage({ image, mime_type, explanation, prompt });
+            }
+          }
+
+          if (data.transcription) {
+            const { text, sender, finished } = data.transcription;
+            console.log('[WebSocket] Received transcription chunk:', {
+              sender,
+              finished,
+              textPreview: typeof text === 'string' ? text.slice(0, 60) : '',
+              textLength: typeof text === 'string' ? text.length : 0,
+            });
+            setLastTranscription({ text, sender, finished });
           }
         } catch (error) {
           console.error('Error handling message:', error);
@@ -332,6 +374,10 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode; url: strin
     console.log(`[Audio] Cleared audio queue (${queueLength} chunks removed)`);
   }, []);
 
+  const clearEditedImage = useCallback(() => {
+    setLastEditedImage(null);
+  }, []);
+
   return (
     <WebSocketContext.Provider 
       value={{ 
@@ -341,7 +387,10 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode; url: strin
         lastAudioData,
         isConnected,
         playbackAudioLevel,
-        connect // Expose connect function in the context
+        connect,
+        lastEditedImage,
+        clearEditedImage,
+        lastTranscription
       }}
     >
       {children}

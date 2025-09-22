@@ -1,16 +1,10 @@
 import * as React from "react";
 import { useRef, useState, useEffect } from "react";
 import { Button } from "./ui/button";
-import { ScrollArea } from "./ui/scroll-area";
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Progress } from "./ui/progress";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { useWebSocket } from "./WebSocketProvider";
 import { Base64 } from 'js-base64';
-
-interface ChatMessage {
-  text: string;
-  timestamp: string;
-}
 
 const ScreenShare: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -21,31 +15,13 @@ const ScreenShare: React.FC = () => {
   const [isSharing, setIsSharing] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
-  const [messages, setMessages] = useState<ChatMessage[]>([{
-    text: "Welcome! Click 'Connect to Server' to begin.",
-    timestamp: new Date().toLocaleTimeString()
-  }]);
-  const { sendMessage, sendMediaChunk, isConnected, playbackAudioLevel, lastMessage, connect } = useWebSocket();
+  const { sendMessage, sendMediaChunk, isConnected, playbackAudioLevel, connect } = useWebSocket();
   const captureIntervalRef = useRef<NodeJS.Timeout>();
-
-  // Handle incoming messages
-  useEffect(() => {
-    if (lastMessage) {
-      setMessages(prev => [...prev, {
-        text: lastMessage,
-        timestamp: new Date().toLocaleTimeString()
-      }]);
-    }
-  }, [lastMessage]);
 
   // Handle connection state changes
   useEffect(() => {
     if (isConnected) {
       setIsConnecting(false);
-      setMessages(prev => [...prev, {
-        text: "Connected to server successfully. You can now share your screen.",
-        timestamp: new Date().toLocaleTimeString()
-      }]);
     }
   }, [isConnected]);
 
@@ -53,10 +29,6 @@ const ScreenShare: React.FC = () => {
     if (isConnected) return;
     
     setIsConnecting(true);
-    setMessages(prev => [...prev, {
-      text: "Connecting to server...",
-      timestamp: new Date().toLocaleTimeString()
-    }]);
     connect();
   };
 
@@ -194,28 +166,21 @@ const ScreenShare: React.FC = () => {
   };
 
   return (
-    <div className="container mx-auto p-6 space-y-6 max-w-3xl">
-      {/* Welcome Header */}
-      <div className="text-center space-y-2">
-        <h1 className="scroll-m-20 text-4xl font-extrabold tracking-tight lg:text-5xl text-white">
-          Welcome to AI Screen Sharing Assistant
-        </h1>
-        <p className="text-xl text-gray-200">
-          Share your screen and talk to me
-        </p>
-      </div>
-
-      {/* Screen Preview */}
-      <Card className="w-full md:w-[640px] mx-auto bg-white/10 backdrop-blur-sm border-white/20">
-        <CardContent className="p-6">
+    <Card className="w-full h-full bg-white/10 backdrop-blur-sm border-white/20">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-white">Screen Share</CardTitle>
+      </CardHeader>
+      <CardContent>
           <div className="flex flex-col items-center space-y-4">
+          <div className="w-full" style={{ height: "calc((100vh - 240px) / 2 - 80px)" }}>
             <video
               ref={videoRef}
               autoPlay
               playsInline
               muted
-              className="w-full aspect-video rounded-md border border-white/20 bg-black/40"
+              className="w-full h-full object-contain rounded-md border border-white/20 bg-black/40"
             />
+          </div>
             {/* Combined Audio Level Indicator */}
             {isSharing && (
               <div className="w-full space-y-2">
@@ -254,34 +219,6 @@ const ScreenShare: React.FC = () => {
           </div>
         </CardContent>
       </Card>
-
-      {/* Chat History */}
-      <Card className="w-full md:w-[640px] mx-auto bg-white/10 backdrop-blur-sm border-white/20">
-        <CardHeader>
-          <CardTitle className="text-white">Chat History</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ScrollArea className="h-[400px] pr-4">
-            <div className="space-y-4">
-              {messages.map((message, index) => (
-                <div 
-                  key={index} 
-                  className="flex items-start space-x-4 rounded-lg p-4 bg-white/5 border border-white/10"
-                >
-                  <div className="h-8 w-8 rounded-full flex items-center justify-center bg-white text-black">
-                    <span className="text-xs font-medium">AI</span>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm leading-loose text-gray-100">{message.text}</p>
-                    <p className="text-xs text-gray-400">{message.timestamp}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </ScrollArea>
-        </CardContent>
-      </Card>
-    </div>
   );
 };
 
